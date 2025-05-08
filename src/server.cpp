@@ -1,8 +1,11 @@
 #include <iostream>
 #include <cstdlib>
 #include <string>
+#include <sstream>
+#include <vector>
 #include <cstring>
 #include <unistd.h>
+#include <sys/epoll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -53,16 +56,90 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  struct sockaddr_in client_addr;
-  int client_addr_len = sizeof(client_addr);
+  // Register server listening socket
+  int ep_fd = epoll_create1(0);
+  struct epoll_event server_ev{};
+  server_ev.events = EPOLLIN;
+  server_ev.data.fd = server_fd;
 
-  std::cout << "Waiting for a client to connect...\n";
+  epoll_ctl(ep_fd, EPOLL_CTL_ADD, server_fd, &server_ev);
+  epoll_event events[10]{};
 
-  int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-  std::cout << "Client connected\n";
+  // Receive buffer
+  std::vector<char> recvBuffer(4096);
+  std::string resp_ok{"HTTP/1.1 200 OK\r\n\r\n"};
+  std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n\r\n"};
 
-  std::string res = "HTTP/1.1 200 OK\r\n\r\n";
-  send(client_fd, res.data(), res.size(), 0);
+  // Enter event loop
+  while (true)
+  {
+    int nfds = epoll_wait(ep_fd, events, 10, -1);
+
+    // Check for events
+    for (int i = 0; i < nfds; ++i)
+    {
+      int fd = events[i].data.fd;
+
+      // If event source is from the server
+      if (fd == server_fd)
+      {
+        // Accept new connection
+        struct sockaddr_in client_addr{};
+        socklen_t client_addr_len = sizeof(client_addr);
+        int client_fd = accept(server_fd, reinterpret_cast<struct sockaddr *>(&client_addr), &client_addr_len);
+
+        // An error occurred
+        if (client_fd < 0)
+        {
+          perror("Client connection error");
+          continue;
+        }
+
+        std::cout << "Client connected!" << '\n';
+
+        // Register client with epoll
+        epoll_event client_ev{};
+        client_ev.events = EPOLLIN;
+        client_ev.data.fd = client_fd;
+        epoll_ctl(ep_fd, EPOLL_CTL_ADD, client_fd, &client_ev);
+      }
+      else
+      {
+        // Client read
+        ssize_t bytes = recv(fd, recvBuffer.data(), recvBuffer.size(), 0);
+
+        // Client sent something
+        if (bytes > 0)
+        {
+          std::string req(recvBuffer.data(), bytes);
+          std::cout << "Received: " << req << '\n';
+          std::istringstream iss(req);
+          std::string method, path, version;
+          iss >> method >> path >> version;
+
+          // Determine request method
+          if (method == "GET")
+          {
+            if (path == "/")
+            {
+              send(fd, resp_ok.data(), resp_ok.size(), 0);
+            }
+            else
+            {
+              send(fd, resp_not_found.data(), resp_not_found.size(), 0);
+            }
+          }
+        }
+        else
+        {
+          // Client disconnected or error
+          std::cout << "Client disconnected" << '\n';
+          close(fd);
+          epoll_ctl(ep_fd, EPOLL_CTL_DEL, fd, nullptr);
+        }
+      }
+    }
+  }
 
   close(server_fd);
 
