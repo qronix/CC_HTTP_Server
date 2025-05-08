@@ -95,7 +95,11 @@ int main(int argc, char **argv)
       return;
     }
 
-    send(client_fd, resp_ok.data(), resp_ok.size(), 0);
+    std::string response{
+        resp_ok + "\r\n" +
+        "Content-Type: text/plain\r\n"};
+
+    send(client_fd, response.data(), response.size(), 0);
   };
 
   std::vector<std::pair<std::string, std::function<void(const std::string_view, int)>>> routeHandlers = {
