@@ -76,7 +76,7 @@ int main(int argc, char **argv)
     std::string prefix{"/echo/"};
     std::string body{path.substr(prefix.size())};
     std::string headers{
-        resp_ok +
+        resp_ok + "\r\n" +
         "Content-Type: text/plain\r\n" +
         "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
 
