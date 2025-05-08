@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <string>
 #include <sstream>
+#include <string_view>
 #include <vector>
 #include <cstring>
 #include <unistd.h>
@@ -10,6 +11,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <unordered_map>
+#include <functional>
 
 int main(int argc, char **argv)
 {
@@ -65,10 +68,61 @@ int main(int argc, char **argv)
   epoll_ctl(ep_fd, EPOLL_CTL_ADD, server_fd, &server_ev);
   epoll_event events[10]{};
 
-  // Receive buffer
-  std::vector<char> recvBuffer(4096);
   std::string resp_ok{"HTTP/1.1 200 OK\r\n\r\n"};
   std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n\r\n"};
+
+  auto handleEcho = [&](const std::string_view path, int client_fd)
+  {
+    std::string prefix{"/echo/"};
+    std::string body{path.substr(prefix.size())};
+    std::string headers{
+        resp_ok +
+        "Content-Type: text/plain\r\n" +
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
+
+    std::string response = headers + body;
+    std::cout << "response: " << response << '\n';
+    std::cout << "body: " << body << '\n';
+    send(client_fd, response.data(), response.size(), 0);
+  };
+
+  auto handleRoot = [&](const std::string_view path, int client_fd)
+  {
+    if (path.size() > 1)
+    {
+      send(client_fd, resp_not_found.data(), resp_not_found.size(), 0);
+
+      return;
+    }
+
+    send(client_fd, resp_ok.data(), resp_ok.size(), 0);
+  };
+
+  std::vector<std::pair<std::string, std::function<void(const std::string_view, int)>>> routeHandlers = {
+      {"/echo/", handleEcho},
+      {"/", handleRoot},
+  };
+
+  auto dispatch = [&](const std::string_view path, int client_fd)
+  {
+    for (const auto &[prefix, handler] : routeHandlers)
+    {
+
+      if (path.starts_with(prefix))
+      {
+        std::cout << "Path starts with: " << prefix << '\n';
+        std::cout << "Path is: " << path << '\n';
+        handler(path, client_fd);
+
+        return;
+      }
+    }
+
+    send(client_fd, resp_not_found.data(), resp_ok.size(), 0);
+  };
+
+  // Receive buffer
+  std::vector<char> recvBuffer(4096);
 
   // Enter event loop
   while (true)
@@ -120,14 +174,15 @@ int main(int argc, char **argv)
           // Determine request method
           if (method == "GET")
           {
-            if (path == "/")
-            {
-              send(fd, resp_ok.data(), resp_ok.size(), 0);
-            }
-            else
-            {
-              send(fd, resp_not_found.data(), resp_not_found.size(), 0);
-            }
+            dispatch(path, fd);
+            // if (path == "/")
+            // {
+            //   send(fd, resp_ok.data(), resp_ok.size(), 0);
+            // }
+            // else
+            // {
+            //   send(fd, resp_not_found.data(), resp_not_found.size(), 0);
+            // }
           }
         }
         else
