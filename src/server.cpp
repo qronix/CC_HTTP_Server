@@ -81,8 +81,8 @@ int main(int argc, char **argv)
         "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
 
     std::string response = headers + body;
-    std::cout << "response: " << response << '\n';
-    std::cout << "body: " << body << '\n';
+    // std::cout << "response: " << response << '\n';
+    // std::cout << "body: " << body << '\n';
     send(client_fd, response.data(), response.size(), 0);
   };
 
@@ -114,8 +114,8 @@ int main(int argc, char **argv)
 
       if (path.starts_with(prefix))
       {
-        std::cout << "Path starts with: " << prefix << '\n';
-        std::cout << "Path is: " << path << '\n';
+        // std::cout << "Path starts with: " << prefix << '\n';
+        // std::cout << "Path is: " << path << '\n';
         handler(path, client_fd);
 
         return;
@@ -170,7 +170,7 @@ int main(int argc, char **argv)
         if (bytes > 0)
         {
           std::string req(recvBuffer.data(), bytes);
-          std::cout << "Received: " << req << '\n';
+          // std::cout << "Received: " << req << '\n';
           std::istringstream iss(req);
           std::string method, path, version;
           iss >> method >> path >> version;
@@ -178,6 +178,7 @@ int main(int argc, char **argv)
           // Determine request method
           if (method == "GET")
           {
+            
             dispatch(path, fd);
             // if (path == "/")
             // {
