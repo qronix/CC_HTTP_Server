@@ -76,13 +76,12 @@ int main(int argc, char **argv)
     std::string prefix{"/echo/"};
     std::string body{path.substr(prefix.size())};
     std::string headers{
-        resp_ok + "\r\n" +
+        resp_ok +
         "Content-Type: text/plain\r\n" +
         "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
 
-    std::string response = headers + body + "\r\n";
-    // std::cout << "response: " << response << '\n';
-    // std::cout << "body: " << body << '\n';
+    std::string response = headers + body;
+
     send(client_fd, response.data(), response.size(), 0);
   };
 
@@ -90,14 +89,20 @@ int main(int argc, char **argv)
   {
     if (path.size() > 1)
     {
-      send(client_fd, resp_not_found.data(), resp_not_found.size(), 0);
+      std::string response{
+          resp_not_found +
+          "Content-Type: text/plain\r\n" +
+          "Content-Length: 0\r\n\r\n"};
+
+      send(client_fd, response.data(), response.size(), 0);
 
       return;
     }
 
     std::string response{
-        resp_ok + "\r\n" +
-        "Content-Type: text/plain\r\n"};
+        resp_ok +
+        "Content-Type: text/plain\r\n" +
+        "Content-Length: 0\r\n\r\n"};
 
     send(client_fd, response.data(), response.size(), 0);
   };
@@ -121,8 +126,9 @@ int main(int argc, char **argv)
     }
 
     std::string response{
-        resp_not_found + "\r\n" +
-        "Content-Type: text/plain\r\n"};
+        resp_not_found +
+        "Content-Type: text/plain\r\n" +
+        "Content-Length: 0\r\n\r\n"};
 
     send(client_fd, response.data(), response.size(), 0);
   };
