@@ -68,8 +68,8 @@ int main(int argc, char **argv)
   epoll_ctl(ep_fd, EPOLL_CTL_ADD, server_fd, &server_ev);
   epoll_event events[10]{};
 
-  std::string resp_ok{"HTTP/1.1 200 OK\r\n\r\n"};
-  std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n\r\n"};
+  std::string resp_ok{"HTTP/1.1 200 OK\r\n"};
+  std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n"};
 
   auto handleEcho = [&](const std::string_view path, int client_fd)
   {
@@ -80,7 +80,7 @@ int main(int argc, char **argv)
         "Content-Type: text/plain\r\n" +
         "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
 
-    std::string response = headers + body;
+    std::string response = headers + body + "\r\n";
     // std::cout << "response: " << response << '\n';
     // std::cout << "body: " << body << '\n';
     send(client_fd, response.data(), response.size(), 0);
@@ -114,15 +114,17 @@ int main(int argc, char **argv)
 
       if (path.starts_with(prefix))
       {
-        // std::cout << "Path starts with: " << prefix << '\n';
-        // std::cout << "Path is: " << path << '\n';
         handler(path, client_fd);
 
         return;
       }
     }
 
-    send(client_fd, resp_not_found.data(), resp_ok.size(), 0);
+    std::string response{
+        resp_not_found + "\r\n" +
+        "Content-Type: text/plain\r\n"};
+
+    send(client_fd, response.data(), response.size(), 0);
   };
 
   // Receive buffer
@@ -178,7 +180,7 @@ int main(int argc, char **argv)
           // Determine request method
           if (method == "GET")
           {
-            
+
             dispatch(path, fd);
             // if (path == "/")
             // {
