@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <string_view>
+#include <map>
 #include <vector>
 #include <cstring>
 #include <unistd.h>
@@ -13,6 +14,8 @@
 #include <netdb.h>
 #include <unordered_map>
 #include <functional>
+
+using Headers = std::unordered_map<std::string, std::string>;
 
 int main(int argc, char **argv)
 {
@@ -71,21 +74,19 @@ int main(int argc, char **argv)
   std::string resp_ok{"HTTP/1.1 200 OK\r\n"};
   std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n"};
 
-  auto handleEcho = [&](const std::string_view path, int client_fd)
+  auto handleEcho = [&](const std::string_view path, int client_fd, const Headers &headers)
   {
     std::string prefix{"/echo/"};
     std::string body{path.substr(prefix.size())};
-    std::string headers{
+    std::string response{
         resp_ok +
         "Content-Type: text/plain\r\n" +
-        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n"};
-
-    std::string response = headers + body;
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body};
 
     send(client_fd, response.data(), response.size(), 0);
   };
 
-  auto handleRoot = [&](const std::string_view path, int client_fd)
+  auto handleRoot = [&](const std::string_view path, int client_fd, const Headers &headers)
   {
     if (path.size() > 1)
     {
@@ -107,19 +108,34 @@ int main(int argc, char **argv)
     send(client_fd, response.data(), response.size(), 0);
   };
 
-  std::vector<std::pair<std::string, std::function<void(const std::string_view, int)>>> routeHandlers = {
+  auto handleUserAgent = [&](const std::string_view path, int client_fd, const Headers &headers)
+  {
+    std::string body{headers.count("user-agent") ? headers.at("user-agent") : "unknown"};
+    std::string response{
+        resp_ok +
+        "Content-Type: text/plain\r\n" +
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" +
+        body};
+
+    send(client_fd, response.data(), response.size(), 0);
+
+    return;
+  };
+
+  std::vector<std::pair<std::string, std::function<void(const std::string_view, int, const Headers &)>>> routeHandlers = {
+      {"/user-agent", handleUserAgent},
       {"/echo/", handleEcho},
       {"/", handleRoot},
   };
 
-  auto dispatch = [&](const std::string_view path, int client_fd)
+  auto dispatch = [&](const std::string_view path, int client_fd, const Headers &headers)
   {
     for (const auto &[prefix, handler] : routeHandlers)
     {
 
       if (path.starts_with(prefix))
       {
-        handler(path, client_fd);
+        handler(path, client_fd, headers);
 
         return;
       }
@@ -178,24 +194,41 @@ int main(int argc, char **argv)
         if (bytes > 0)
         {
           std::string req(recvBuffer.data(), bytes);
-          // std::cout << "Received: " << req << '\n';
           std::istringstream iss(req);
           std::string method, path, version;
           iss >> method >> path >> version;
 
+          std::string dummyLine{};
+          std::getline(iss, dummyLine);
+
+          // Read headers
+          std::string headerLine{};
+          Headers headers;
+
+          while (std::getline(iss, headerLine) && headerLine != "\r")
+          {
+            if (!headerLine.empty() && headerLine.back() == '\r')
+            {
+              headerLine.pop_back();
+            }
+
+            auto colonPos = headerLine.find(": ");
+            if (colonPos != std::string::npos)
+            {
+              std::string key{headerLine.substr(0, colonPos)};
+              // Normalize header keys since the HTTP spec states
+              // they are case-insensitive
+              std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+              std::string value{headerLine.substr(colonPos + 2)};
+
+              headers[key] = value;
+            }
+          }
+
           // Determine request method
           if (method == "GET")
           {
-
-            dispatch(path, fd);
-            // if (path == "/")
-            // {
-            //   send(fd, resp_ok.data(), resp_ok.size(), 0);
-            // }
-            // else
-            // {
-            //   send(fd, resp_not_found.data(), resp_not_found.size(), 0);
-            // }
+            dispatch(path, fd, headers);
           }
         }
         else
