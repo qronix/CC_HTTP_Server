@@ -19,6 +19,38 @@
 
 using Headers = std::unordered_map<std::string, std::string>;
 
+enum class HttpMethod
+{
+  GET,
+  POST,
+  UNKNOWN,
+};
+
+HttpMethod parseHttpMethod(const std::string_view method)
+{
+  static const std::unordered_map<std::string_view, HttpMethod> methodMap = {
+      {"GET", HttpMethod::GET},
+      {"POST", HttpMethod::POST},
+  };
+
+  auto it = methodMap.find(method);
+
+  return (it != methodMap.end()) ? it->second : HttpMethod::UNKNOWN;
+}
+
+std::string stringifyHttpMethod(HttpMethod method)
+{
+  switch (method)
+  {
+  case HttpMethod::GET:
+    return "GET";
+  case HttpMethod::POST:
+    return "POST";
+  default:
+    return "UNKNOWN";
+  }
+}
+
 int main(int argc, char **argv)
 {
   std::string_view directory{};
@@ -87,7 +119,7 @@ int main(int argc, char **argv)
   std::string resp_ok{"HTTP/1.1 200 OK\r\n"};
   std::string resp_not_found{"HTTP/1.1 404 Not Found\r\n"};
 
-  auto handleEcho = [&](const std::string_view path, int client_fd, const Headers &headers)
+  auto handleEcho = [&](const std::string_view path, int client_fd, const Headers &headers, HttpMethod method, std::istream &bodyStream)
   {
     std::string prefix{"/echo/"};
     std::string body{path.substr(prefix.size())};
@@ -99,7 +131,7 @@ int main(int argc, char **argv)
     send(client_fd, response.data(), response.size(), 0);
   };
 
-  auto handleRoot = [&](const std::string_view path, int client_fd, const Headers &headers)
+  auto handleRoot = [&](const std::string_view path, int client_fd, const Headers &headers, HttpMethod method, std::istream &bodyStream)
   {
     if (path.size() > 1)
     {
@@ -121,7 +153,7 @@ int main(int argc, char **argv)
     send(client_fd, response.data(), response.size(), 0);
   };
 
-  auto handleUserAgent = [&](const std::string_view path, int client_fd, const Headers &headers)
+  auto handleUserAgent = [&](const std::string_view path, int client_fd, const Headers &headers, HttpMethod method, std::istream &bodyStream)
   {
     std::string body{headers.count("user-agent") ? headers.at("user-agent") : "unknown"};
     std::string response{
@@ -135,7 +167,7 @@ int main(int argc, char **argv)
     return;
   };
 
-  auto handleFiles = [&](const std::string_view path, int client_fd, const Headers &headers)
+  auto handleFiles = [&](const std::string_view path, int client_fd, const Headers &headers, HttpMethod method, std::istream &bodyStream)
   {
     std::string_view prefix{"/files/"};
 
@@ -153,56 +185,98 @@ int main(int argc, char **argv)
           "Content-Type: text/plain\r\n" +
           "Content-Length: 0\r\n\r\n"};
 
-      // Serve file
-      if (std::filesystem::exists(fullPath))
+      switch (method)
       {
-        std::ifstream file(fullPath, std::ios::in | std::ios::binary);
-
-        // File not found - bail with 404
-        if (!file)
+      case HttpMethod::GET:
+      {
+        // Serve file
+        if (std::filesystem::exists(fullPath))
         {
-          send(client_fd, response.data(), response.size(), 0);
+          std::ifstream file(fullPath, std::ios::in | std::ios::binary);
 
-          return;
+          // File not found - bail with 404
+          if (!file)
+          {
+            send(client_fd, response.data(), response.size(), 0);
+
+            return;
+          }
+          // Read file contents as binary
+          std::string contents{};
+          file.seekg(0, std::ios::end);
+          // Preallocate memory
+          contents.resize(file.tellg());
+          file.seekg(0, std::ios::beg);
+          file.read(&contents[0], contents.size());
+
+          std::cout << "Contents: " << contents << '\n';
+
+          response = {
+              resp_ok +
+              "Content-Type: application/octet-stream\r\n" +
+              "Content-Length: " + std::to_string(contents.size()) + "\r\n\r\n" +
+              contents};
         }
-        // Read file contents as binary
-        std::string contents{};
-        file.seekg(0, std::ios::end);
-        // Preallocate memory
-        contents.resize(file.tellg());
-        file.seekg(0, std::ios::beg);
-        file.read(&contents[0], contents.size());
 
-        std::cout << "Contents: " << contents << '\n';
+        send(client_fd, response.data(), response.size(), 0);
 
-        response = {
-            resp_ok +
-            "Content-Type: application/octet-stream\r\n" +
-            "Content-Length: " + std::to_string(contents.size()) + "\r\n\r\n" +
-            contents};
+        return;
       }
+      case HttpMethod::POST:
+      {
+        size_t contentLength{};
+        std::string body{};
 
-      send(client_fd, response.data(), response.size(), 0);
+        auto it{headers.find("content-length")};
+        if (it != headers.end())
+        {
+          contentLength = std::stoul(it->second);
 
-      return;
+          body.resize(contentLength);
+          bodyStream.read(&body[0], contentLength);
+
+          if (contentLength != 0 && contentLength == body.size())
+          {
+            std::string bodyData{};
+            bodyData.resize(contentLength, '\0');
+
+            std::ofstream out{fullPath, std::ios::binary};
+            out.write(body.data(), body.size());
+
+            if (!out.good())
+            {
+              std::string resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+              send(client_fd, resp.data(), resp.size(), 0);
+
+              return;
+            }
+
+            std::string response{"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n"};
+            send(client_fd, response.data(), response.size(), 0);
+
+            return;
+          }
+        }
+      }
+      }
     }
   };
 
-  std::vector<std::pair<std::string, std::function<void(const std::string_view, int, const Headers &)>>> routeHandlers = {
+  std::vector<std::pair<std::string, std::function<void(const std::string_view, int, const Headers &, HttpMethod method, std::istream &bodyStream)>>> routeHandlers = {
       {"/user-agent", handleUserAgent},
       {"/files/", handleFiles},
       {"/echo/", handleEcho},
       {"/", handleRoot},
   };
 
-  auto dispatch = [&](const std::string_view path, int client_fd, const Headers &headers)
+  auto dispatch = [&](const std::string_view path, int client_fd, const Headers &headers, HttpMethod method, std::istream &bodyStream)
   {
     for (const auto &[prefix, handler] : routeHandlers)
     {
 
       if (path.starts_with(prefix))
       {
-        handler(path, client_fd, headers);
+        handler(path, client_fd, headers, method, bodyStream);
 
         return;
       }
@@ -292,11 +366,9 @@ int main(int argc, char **argv)
             }
           }
 
-          // Determine request method
-          if (method == "GET")
-          {
-            dispatch(path, fd, headers);
-          }
+          HttpMethod parsedMethod{parseHttpMethod(method)};
+
+          dispatch(path, fd, headers, parsedMethod, iss);
         }
         else
         {
