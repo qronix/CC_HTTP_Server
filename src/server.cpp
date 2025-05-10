@@ -14,6 +14,8 @@
 #include <netdb.h>
 #include <unordered_map>
 #include <functional>
+#include <filesystem>
+#include <fstream>
 
 using Headers = std::unordered_map<std::string, std::string>;
 
@@ -122,8 +124,61 @@ int main(int argc, char **argv)
     return;
   };
 
+  auto handleFiles = [&](const std::string_view path, int client_fd, const Headers &headers)
+  {
+    std::string_view prefix{"/files/"};
+
+    if (path.starts_with(prefix))
+    {
+      std::string_view fileNameView = path.substr(prefix.size());
+
+      std::filesystem::path fileName{fileNameView};
+      std::filesystem::path fullPath{"/tmp"};
+      fullPath /= fileName;
+
+      std::string response{
+          resp_not_found +
+          "Content-Type: text/plain\r\n" +
+          "Content-Length: 0\r\n\r\n"};
+
+      // Serve file
+      if (std::filesystem::exists(fullPath))
+      {
+        std::ifstream file(fullPath, std::ios::in | std::ios::binary);
+
+        // File not found - bail with 404
+        if (!file)
+        {
+          send(client_fd, response.data(), response.size(), 0);
+
+          return;
+        }
+        // Read file contents as binary
+        std::string contents{};
+        file.seekg(0, std::ios::end);
+        // Preallocate memory
+        contents.resize(file.tellg());
+        file.seekg(0, std::ios::beg);
+        file.read(&contents[0], contents.size());
+
+        std::cout << "Contents: " << contents << '\n';
+
+        response = {
+            resp_ok +
+            "Content-Type: application/octet-stream\r\n" +
+            "Content-Length: " + std::to_string(contents.size()) + "\r\n\r\n" +
+            contents};
+      }
+
+      send(client_fd, response.data(), response.size(), 0);
+
+      return;
+    }
+  };
+
   std::vector<std::pair<std::string, std::function<void(const std::string_view, int, const Headers &)>>> routeHandlers = {
       {"/user-agent", handleUserAgent},
+      {"/files/", handleFiles},
       {"/echo/", handleEcho},
       {"/", handleRoot},
   };
