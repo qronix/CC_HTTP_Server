@@ -21,6 +21,17 @@ using Headers = std::unordered_map<std::string, std::string>;
 
 int main(int argc, char **argv)
 {
+  std::string_view directory{};
+
+  for (int i = 0; i < argc - 1; ++i)
+  {
+    if (std::string(argv[i]) == "--directory" && i + 1 < argc)
+    {
+      directory = argv[i + 1];
+      break;
+    }
+  }
+
   // Flush after every std::cout / std::cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
@@ -133,7 +144,8 @@ int main(int argc, char **argv)
       std::string_view fileNameView = path.substr(prefix.size());
 
       std::filesystem::path fileName{fileNameView};
-      std::filesystem::path fullPath{"/tmp"};
+      std::filesystem::path fullPath{directory};
+
       fullPath /= fileName;
 
       std::string response{
