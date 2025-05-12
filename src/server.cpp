@@ -51,6 +51,27 @@ std::string stringifyHttpMethod(HttpMethod method)
   }
 }
 
+std::vector<std::string> splitCommaDelimited(const std::string &stringValue)
+{
+  std::vector<std::string> result{};
+  std::stringstream ss(stringValue);
+  std::string token{};
+
+  while (std::getline(ss, token, ','))
+  {
+    // Trim whitespace
+    size_t start{token.find_first_not_of(" \t")};
+    size_t end{token.find_last_not_of(" \t")};
+
+    if (start != std::string::npos)
+    {
+      result.push_back(token.substr(start, end - start + 1));
+    }
+  }
+
+  return result;
+}
+
 int main(int argc, char **argv)
 {
   std::string_view directory{};
@@ -126,17 +147,20 @@ int main(int argc, char **argv)
 
     if (headers.contains("accept-encoding"))
     {
-      std::string encoding{headers.at("accept-encoding")};
+      auto encodings{splitCommaDelimited(headers.at("accept-encoding"))};
 
-      if (encoding == "gzip")
+      for (const auto &enc : encodings)
       {
-        std::string response{
-            resp_ok +
-            "Content-Encoding: gzip\r\n" +
-            "Content-Type: text/plain\r\n" +
-            "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body};
+        if (enc == "gzip")
+        {
+          std::string response{
+              resp_ok +
+              "Content-Encoding: gzip\r\n" +
+              "Content-Type: text/plain\r\n" +
+              "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body};
 
-        send(client_fd, response.data(), response.size(), 0);
+          send(client_fd, response.data(), response.size(), 0);
+        }
       }
     }
 
