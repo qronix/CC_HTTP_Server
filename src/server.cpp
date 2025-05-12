@@ -123,6 +123,23 @@ int main(int argc, char **argv)
   {
     std::string prefix{"/echo/"};
     std::string body{path.substr(prefix.size())};
+
+    if (headers.contains("accept-encoding"))
+    {
+      std::string encoding{headers.at("accept-encoding")};
+
+      if (encoding == "gzip")
+      {
+        std::string response{
+            resp_ok +
+            "Content-Encoding: gzip\r\n" +
+            "Content-Type: text/plain\r\n" +
+            "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body};
+
+        send(client_fd, response.data(), response.size(), 0);
+      }
+    }
+
     std::string response{
         resp_ok +
         "Content-Type: text/plain\r\n" +
